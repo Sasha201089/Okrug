@@ -502,7 +502,6 @@ async def catch_all_handler(callback: CallbackQuery):
 
 def register_handlers(dp):
     dp.message.register(show_filters_menu, Command("filters"))
-    dp.callback_query.register(catch_all_handler)
     dp.callback_query.register(handle_set_price_min, F.data == "set_price_min")
     dp.callback_query.register(handle_set_price_max, F.data == "set_price_max")
     dp.callback_query.register(handle_filter_roles, F.data == "filter_roles")
@@ -527,4 +526,5 @@ def register_handlers(dp):
     dp.callback_query.register(handle_back_to_filters, F.data == "filter_format_done")
     dp.callback_query.register(handle_back_to_filters, F.data == "filter_participation_done")
     dp.callback_query.register(handle_back_to_filters, F.data == "filter_payment_done")
+
     #dp.callback_query.register(handle_back_to_filters, F.data.endswith("_done"))
