@@ -6,6 +6,8 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import DataBase.Manager as manager
 import json
+import Head
+import Filters
 
 logging.basicConfig(level=logging.INFO)
 logging.info('Библиотеки импортированы')
@@ -16,14 +18,22 @@ dp = Dispatcher()
 
 class RegistrationState:
     CHOOSE_ROLE = "choose_role"
-    USER_PREFERENCES = "user_preferences"
+    USER_LEVEL = "user_level"
     ORGANIZATION_NAME = "organization_name"
     COMPLETED = "completed"
 
+
 ROLES = {
     "user": "👤 Пользователь",
-    "organization": "🏢 Организация"
+    "organization": "🏢 Руководитель"
 }
+
+LEVELS = {
+    "junior": "👶 Junior",
+    "middle": "💼 Middle",
+    "senior": "👑 Senior"
+}
+
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -41,7 +51,7 @@ async def cmd_start(message: Message):
         }
         manager.write_in_base(user_id, user_data)
         await message.answer(
-            '🌟 Добро пожаловать в AI Agent!\n\n'
+            '🌟 Добро пожаловать в AI Agent!\n'
             'Платформа для поиска мероприятий.'
         )
         await ask_role(message)
@@ -64,12 +74,10 @@ async def continue_registration(message: Message, user_data):
 
     if state == RegistrationState.CHOOSE_ROLE:
         await ask_role(message)
-    elif state == RegistrationState.USER_PREFERENCES:
-        await message.answer('🎯 Опишите ваши предпочтения в плане мероприятий:')
+    elif state == RegistrationState.USER_LEVEL:
+        await ask_level(message)
     elif state == RegistrationState.ORGANIZATION_NAME:
-        await message.answer('🏢 Введите название вашей организации:')
-
-
+        await message.answer('🏢 Введите ваше ФИО:')
 async def ask_role(message: Message):
     keyboard = InlineKeyboardBuilder()
     for role_key, role_name in ROLES.items():
@@ -78,6 +86,18 @@ async def ask_role(message: Message):
 
     await message.answer(
         "🎭 Выберите вашу роль:",
+        reply_markup=keyboard.as_markup()
+    )
+
+
+async def ask_level(message: Message):
+    keyboard = InlineKeyboardBuilder()
+    for level_key, level_name in LEVELS.items():
+        keyboard.add(InlineKeyboardButton(text=level_name, callback_data=f"level_{level_key}"))
+    keyboard.adjust(1)
+
+    await message.answer(
+        "🎯 Выберите ваш уровень:",
         reply_markup=keyboard.as_markup()
     )
 
@@ -91,14 +111,28 @@ async def handle_role_selection(callback: Message):
     user_data['role'] = role
 
     if role == "user":
-        user_data['state'] = RegistrationState.USER_PREFERENCES
-        next_question = '🎯 Опишите ваши предпочтения в плане мероприятий:'
+        user_data['state'] = RegistrationState.USER_LEVEL
+        manager.write_in_base(user_id, user_data)
+        await ask_level(callback.message)
     elif role == "organization":
         user_data['state'] = RegistrationState.ORGANIZATION_NAME
-        next_question = '🏢 Введите название вашей организации:'
+        manager.write_in_base(user_id, user_data)
+        await callback.message.answer('🏢 Введите название вашей организации:')
+
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("level_"))
+async def handle_level_selection(callback: Message):
+    user_id = str(callback.from_user.id)
+    level = callback.data.split("_")[1]
+
+    user_data = manager.get_from_base(user_id)
+    user_data['profile']['level'] = level
+    user_data['state'] = RegistrationState.COMPLETED
 
     manager.write_in_base(user_id, user_data)
-    await callback.message.answer(next_question)
+    await complete_registration(callback.message, user_data, callback.from_user.id)
     await callback.answer()
 
 
@@ -113,26 +147,41 @@ async def handle_text(message: Message):
 
     state = user_data.get('state')
     text = message.text
+    if user_data.get('filters', {}).get('waiting_price_input'):
+        price_type = user_data['filters']['waiting_price_input']
+        try:
+            price = int(text)
+            if price_type == 'min':
+                user_data['filters']['price_min'] = price
+            else:
+                user_data['filters']['price_max'] = price
 
-    if state == RegistrationState.USER_PREFERENCES:
-        user_data['profile']['preferences'] = text
-        user_data['state'] = RegistrationState.COMPLETED
-        manager.write_in_base(user_id, user_data)
-        await complete_registration(message, user_data)
+            user_data['filters'].pop('waiting_price_input', None)
+            manager.write_in_base(user_id, user_data)
 
-    elif state == RegistrationState.ORGANIZATION_NAME:
+            await message.answer(
+                f"✅ {('Минимальная' if price_type == 'min' else 'Максимальная')} стоимость установлена: {price} руб.")
+            await Filters.show_filters_menu(message, user_id)
+            return
+
+        except ValueError:
+            await message.answer("❌ Пожалуйста, введите число:")
+            return
+
+    if state == RegistrationState.ORGANIZATION_NAME:
         user_data['profile']['org_name'] = text
         user_data['state'] = RegistrationState.COMPLETED
         manager.write_in_base(user_id, user_data)
-        await complete_registration(message, user_data)
+        await complete_registration(message, user_data, message.from_user.id)
 
 
-async def complete_registration(message: Message, user_data):
+async def complete_registration(message: Message, user_data, user_id):
     role_name = ROLES.get(user_data['role'])
     user_name = user_data['name']
 
     if user_data['role'] == 'user':
-        profile_summary = f"🎯 Предпочтения: {user_data['profile']['preferences']}"
+        level_name = LEVELS.get(user_data['profile']['level'], user_data['profile']['level'])
+        profile_summary = f"🎯 Уровень: {level_name}"
     elif user_data['role'] == 'organization':
         profile_summary = f"🏢 Название организации: {user_data['profile']['org_name']}"
 
@@ -142,9 +191,12 @@ async def complete_registration(message: Message, user_data):
         f'📊 Ваш профиль:\n{profile_summary}\n\n'
         f'🚀 Добро пожаловать в наш проект!'
     )
+    await Head.show_main_menu(message)
 
 
 async def main():
+    Head.register_handlers(dp)
+    Filters.register_handlers(dp)
     await dp.start_polling(bot)
 
 
