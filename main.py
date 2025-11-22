@@ -8,6 +8,7 @@ import DataBase.Manager as manager
 import json
 import Head
 import Filters
+import Calendar
 
 logging.basicConfig(level=logging.INFO)
 logging.info('Библиотеки импортированы')
@@ -18,8 +19,11 @@ dp = Dispatcher()
 
 class RegistrationState:
     CHOOSE_ROLE = "choose_role"
+    USER_FULLNAME = "user_fullname"
     USER_LEVEL = "user_level"
+    USER_DEPARTMENT = "user_department"
     ORGANIZATION_NAME = "organization_name"
+    ORGANIZATION_DEPARTMENT = "organization_department"
     COMPLETED = "completed"
 
 
@@ -74,10 +78,18 @@ async def continue_registration(message: Message, user_data):
 
     if state == RegistrationState.CHOOSE_ROLE:
         await ask_role(message)
+    elif state == RegistrationState.USER_FULLNAME:
+        await message.answer('👤 Введите ваше ФИО:')
     elif state == RegistrationState.USER_LEVEL:
         await ask_level(message)
+    elif state == RegistrationState.USER_DEPARTMENT:
+        await message.answer('🏢 Введите название вашего отдела (если нет - поставьте прочерк "-"):')
     elif state == RegistrationState.ORGANIZATION_NAME:
-        await message.answer('🏢 Введите ваше ФИО:')
+        await message.answer('🏢 Введите название вашей организации:')
+    elif state == RegistrationState.ORGANIZATION_DEPARTMENT:
+        await message.answer('🏢 Введите название вашего отдела:')
+
+
 async def ask_role(message: Message):
     keyboard = InlineKeyboardBuilder()
     for role_key, role_name in ROLES.items():
@@ -111,9 +123,9 @@ async def handle_role_selection(callback: Message):
     user_data['role'] = role
 
     if role == "user":
-        user_data['state'] = RegistrationState.USER_LEVEL
+        user_data['state'] = RegistrationState.USER_FULLNAME
         manager.write_in_base(user_id, user_data)
-        await ask_level(callback.message)
+        await callback.message.answer('👤 Введите ваше ФИО:')
     elif role == "organization":
         user_data['state'] = RegistrationState.ORGANIZATION_NAME
         manager.write_in_base(user_id, user_data)
@@ -129,11 +141,18 @@ async def handle_level_selection(callback: Message):
 
     user_data = manager.get_from_base(user_id)
     user_data['profile']['level'] = level
-    user_data['state'] = RegistrationState.COMPLETED
+    user_data['state'] = RegistrationState.USER_DEPARTMENT
 
     manager.write_in_base(user_id, user_data)
-    await complete_registration(callback.message, user_data, callback.from_user.id)
+    await callback.message.answer('🏢 Введите название вашего отдела (если нет - поставьте прочерк "-"):')
     await callback.answer()
+
+
+@dp.message(Command("main"))
+async def cmd_main(message: Message):
+    user_id = str(message.from_user.id)
+    user_data = manager.get_from_base(user_id)
+    await Head.show_main_menu(message)
 
 
 @dp.message(F.text)
@@ -146,7 +165,9 @@ async def handle_text(message: Message):
         return
 
     state = user_data.get('state')
-    text = message.text
+    text = message.text.strip()
+
+    # Обработка ввода цены для фильтров
     if user_data.get('filters', {}).get('waiting_price_input'):
         price_type = user_data['filters']['waiting_price_input']
         try:
@@ -168,8 +189,36 @@ async def handle_text(message: Message):
             await message.answer("❌ Пожалуйста, введите число:")
             return
 
-    if state == RegistrationState.ORGANIZATION_NAME:
+    # Обработка регистрационных данных
+    if state == RegistrationState.USER_FULLNAME:
+        if not text:
+            await message.answer("❌ ФИО не может быть пустым. Пожалуйста, введите ваше ФИО:")
+            return
+
+        user_data['profile']['fullname'] = text
+        user_data['state'] = RegistrationState.USER_LEVEL
+        manager.write_in_base(user_id, user_data)
+        await ask_level(message)
+
+    elif state == RegistrationState.ORGANIZATION_NAME:
         user_data['profile']['org_name'] = text
+        user_data['state'] = RegistrationState.ORGANIZATION_DEPARTMENT
+        manager.write_in_base(user_id, user_data)
+        await message.answer('🏢 Введите название вашего отдела:')
+
+    elif state == RegistrationState.ORGANIZATION_DEPARTMENT:
+        if not text:
+            await message.answer("❌ Название отдела не может быть пустым. Пожалуйста, введите название отдела:")
+            return
+
+        user_data['profile']['department'] = text
+        user_data['state'] = RegistrationState.COMPLETED
+        manager.write_in_base(user_id, user_data)
+        await complete_registration(message, user_data, message.from_user.id)
+
+    elif state == RegistrationState.USER_DEPARTMENT:
+        # Для пользователя отдел может быть прочерком
+        user_data['profile']['department'] = text if text != "-" else "-"
         user_data['state'] = RegistrationState.COMPLETED
         manager.write_in_base(user_id, user_data)
         await complete_registration(message, user_data, message.from_user.id)
@@ -180,10 +229,14 @@ async def complete_registration(message: Message, user_data, user_id):
     user_name = user_data['name']
 
     if user_data['role'] == 'user':
+        fullname = user_data['profile'].get('fullname', 'Не указано')
         level_name = LEVELS.get(user_data['profile']['level'], user_data['profile']['level'])
-        profile_summary = f"🎯 Уровень: {level_name}"
+        department = user_data['profile'].get('department', '-')
+        profile_summary = f"👤 ФИО: {fullname}\n🎯 Уровень: {level_name}\n🏢 Отдел: {department}"
     elif user_data['role'] == 'organization':
-        profile_summary = f"🏢 Название организации: {user_data['profile']['org_name']}"
+        org_name = user_data['profile'].get('org_name', 'Не указано')
+        department = user_data['profile'].get('department', 'Не указано')
+        profile_summary = f"🏢 Организация: {org_name}\n🏢 Отдел: {department}"
 
     await message.answer(
         f'✅ Регистрация завершена, {user_name}!\n\n'
@@ -197,6 +250,7 @@ async def complete_registration(message: Message, user_data, user_id):
 async def main():
     Head.register_handlers(dp)
     Filters.register_handlers(dp)
+    Calendar.register_handlers(dp)
     await dp.start_polling(bot)
 
 
