@@ -3,7 +3,7 @@ import json
 import Manager
 
 client = OpenAI(
-  api_key="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"
+  api_key="my_code"
 )
 
 response = client.responses.create(
@@ -21,3 +21,4 @@ print(text)
 text1 = json.load(text)
 for t in text1:
   Manager.write_in_base(t, text1[t])
+
