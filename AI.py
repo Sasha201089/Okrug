@@ -5,13 +5,13 @@ import DataBase.Manager as db
 import EventDataBase.Manager as event
 
 def ai_response(prompt):
-    auth_code = "MDE5YTY4ZDAtOTdlYS03M2JhLTg4MWYtZDc2ZjU4NmIzOWM1OjJkYzdlNjhiLTcwODUtNDU1My05YmI5LTlkYzIyZjEzNGQ2YQ=="
+    auth_code = "My_code"
     with GigaChat(credentials=auth_code, verify_ssl_certs=False) as giga:
         response = giga.chat(prompt)
         return response.choices[0].message.content
 
 def ai_search(user_id):
-    auth_code = "MDE5YTY4ZDAtOTdlYS03M2JhLTg4MWYtZDc2ZjU4NmIzOWM1OjJkYzdlNjhiLTcwODUtNDU1My05YmI5LTlkYzIyZjEzNGQ2YQ=="
+    auth_code = "My_code"
     with GigaChat(credentials=auth_code, verify_ssl_certs=False) as giga:
         user_data = db.get_from_base(str(user_id))
         base = event.get_all_events()
@@ -25,4 +25,5 @@ def ai_search(user_id):
         Если ничего не найдено, то выведи пустую строку''')
         result = response.choices[0].message.content.split(", ")
         return result
+
 #print(ai_search(6785595088))
